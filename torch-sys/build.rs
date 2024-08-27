@@ -41,6 +41,7 @@ https://github.com/LaurentMazare/tch-rs/blob/main/README.md
 enum LinkType {
     Dynamic,
     Static,
+    Runtime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,10 +55,15 @@ enum Os {
 #[derive(Debug, Clone)]
 struct SystemInfo {
     os: Os,
+    #[cfg(not(feature = "runtime-linking"))]
     python_interpreter: PathBuf,
-    cxx11_abi: String,
-    libtorch_include_dirs: Vec<PathBuf>,
-    libtorch_lib_dir: PathBuf,
+    #[cfg(not(feature = "runtime-linking"))]
+        cxx11_abi: String,
+    #[cfg(not(feature = "runtime-linking"))]
+        libtorch_include_dirs: Vec<PathBuf>,
+    #[cfg(not(feature = "runtime-linking"))]
+        libtorch_lib_dir: PathBuf,
+    
     link_type: LinkType,
 }
 
@@ -189,6 +195,17 @@ impl SystemInfo {
                 }
             }
         };
+
+        let link_type = if cfg!(feature = "runtime-linking") {
+            LinkType::Runtime
+        } else {
+            match env_var_rerun("LIBTORCH_STATIC").as_deref() {
+            Err(_) | Ok("0") | Ok("false") | Ok("FALSE") => LinkType::Dynamic,
+            Ok(_) => LinkType::Static,
+            }
+        };
+
+    #[cfg(not(feature = "runtime-linking"))] {
         let mut libtorch_include_dirs = vec![];
         if cfg!(feature = "python-extension") {
             let output = std::process::Command::new(&python_interpreter)
@@ -251,18 +268,38 @@ impl SystemInfo {
             env_var_rerun("LIBTORCH_CXX11_ABI").unwrap_or_else(|_| "1".to_owned())
         };
         let libtorch_lib_dir = libtorch_lib_dir.expect("no libtorch lib dir found");
-        let link_type = match env_var_rerun("LIBTORCH_STATIC").as_deref() {
-            Err(_) | Ok("0") | Ok("false") | Ok("FALSE") => LinkType::Dynamic,
-            Ok(_) => LinkType::Static,
-        };
-        Ok(Self {
-            os,
-            python_interpreter,
-            cxx11_abi,
-            libtorch_include_dirs,
-            libtorch_lib_dir,
-            link_type,
-        })
+        // let link_type = if cfg!(feature = "runtime-linking") {
+        //     LinkType::Runtime
+        // } else {
+        //     match env_var_rerun("LIBTORCH_STATIC").as_deref() {
+        //     Err(_) | Ok("0") | Ok("false") | Ok("FALSE") => LinkType::Dynamic,
+        //     Ok(_) => LinkType::Static,
+        //     }
+        // };
+
+        // Ok(Self {
+        //     os,
+        //     python_interpreter,
+        //     cxx11_abi: Some(cxx11_abi),
+        //     libtorch_include_dirs: Some(libtorch_include_dirs),
+        //     libtorch_lib_dir: Some(libtorch_lib_dir),
+        //     link_type,
+        // })
+
+    }
+    Ok(Self {
+        os,
+        #[cfg(not(feature = "runtime-linking"))]
+        python_interpreter,
+        #[cfg(not(feature = "runtime-linking"))]
+        cxx11_abi,
+        #[cfg(not(feature = "runtime-linking"))]
+        libtorch_include_dirs,
+        #[cfg(not(feature = "runtime-linking"))]
+        libtorch_lib_dir,
+        link_type,
+    })
+
     }
 
     fn check_system_location(os: Os) -> Option<PathBuf> {
@@ -272,6 +309,7 @@ impl SystemInfo {
         }
     }
 
+    #[cfg(not(feature = "runtime-linking"))]
     fn prepare_libtorch_dir(os: Os) -> Result<PathBuf> {
         if let Ok(libtorch) = env_var_rerun("LIBTORCH") {
             Ok(PathBuf::from(libtorch))
@@ -349,6 +387,7 @@ impl SystemInfo {
         }
     }
 
+    #[cfg(not(feature = "runtime-linking"))]
     fn make(&self, use_cuda: bool, use_hip: bool) {
         let cuda_dependency = if use_cuda || use_hip {
             "libtch/dummy_cuda_dependency.cpp"
@@ -412,8 +451,71 @@ impl SystemInfo {
             LinkType::Static => {
                 // TODO: whole-archive might only be necessary for libtorch_cpu?
                 println!("cargo:rustc-link-lib=static:+whole-archive,-bundle={lib_name}")
-            }
+            },
+            LinkType::Runtime => println!("cargo:warning=Runtime linking enabled for {lib_name}"),
+
         }
+    }
+}
+
+#[cfg(not(feature = "runtime-linking"))]
+fn cuda_detect(system_info: SystemInfo) -> () {
+    let si_lib = &system_info.libtorch_lib_dir;
+    let use_cuda =
+        si_lib.join("libtorch_cuda.so").exists() || si_lib.join("torch_cuda.dll").exists();
+    let use_cuda_cu = si_lib.join("libtorch_cuda_cu.so").exists()
+        || si_lib.join("torch_cuda_cu.dll").exists();
+    let use_cuda_cpp = si_lib.join("libtorch_cuda_cpp.so").exists()
+        || si_lib.join("torch_cuda_cpp.dll").exists();
+    let use_hip =
+        si_lib.join("libtorch_hip.so").exists() || si_lib.join("torch_hip.dll").exists();
+    println!("cargo:rustc-link-search=native={}", si_lib.display());
+
+    system_info.make(use_cuda, use_hip);
+
+    println!("cargo:rustc-link-lib=static=tch");
+    if use_cuda {
+        system_info.link("torch_cuda")
+    }
+    if use_cuda_cu {
+        system_info.link("torch_cuda_cu")
+    }
+    if use_cuda_cpp {
+        system_info.link("torch_cuda_cpp")
+    }
+    if use_hip {
+        system_info.link("torch_hip")
+    }
+    if cfg!(feature = "python-extension") {
+        system_info.link("torch_python")
+    }
+    if system_info.link_type == LinkType::Static {
+        // TODO: this has only be tried out on the cpu version. Check that it works
+        // with cuda too and maybe just try linking all available files?
+        system_info.link("asmjit");
+        system_info.link("clog");
+        system_info.link("cpuinfo");
+        system_info.link("dnnl");
+        system_info.link("dnnl_graph");
+        system_info.link("fbgemm");
+        system_info.link("gloo");
+        system_info.link("kineto");
+        system_info.link("nnpack");
+        system_info.link("onnx");
+        system_info.link("onnx_proto");
+        system_info.link("protobuf");
+        system_info.link("pthreadpool");
+        system_info.link("pytorch_qnnpack");
+        system_info.link("sleef");
+        system_info.link("tensorpipe");
+        system_info.link("tensorpipe_uv");
+        system_info.link("XNNPACK");
+    }
+    system_info.link("torch_cpu");
+    system_info.link("torch");
+    system_info.link("c10");
+    if use_hip {
+        system_info.link("c10_hip");
     }
 }
 
@@ -440,63 +542,65 @@ fn main() -> anyhow::Result<()> {
         // if this issue.
         // TODO: Try out the as-needed native link modifier when it lands.
         // https://github.com/rust-lang/rust/issues/99424
-        let si_lib = &system_info.libtorch_lib_dir;
-        let use_cuda =
-            si_lib.join("libtorch_cuda.so").exists() || si_lib.join("torch_cuda.dll").exists();
-        let use_cuda_cu = si_lib.join("libtorch_cuda_cu.so").exists()
-            || si_lib.join("torch_cuda_cu.dll").exists();
-        let use_cuda_cpp = si_lib.join("libtorch_cuda_cpp.so").exists()
-            || si_lib.join("torch_cuda_cpp.dll").exists();
-        let use_hip =
-            si_lib.join("libtorch_hip.so").exists() || si_lib.join("torch_hip.dll").exists();
-        println!("cargo:rustc-link-search=native={}", si_lib.display());
+        #[cfg(not(feature = "runtime-linking"))]
+        cuda_detect(system_info);
+        // let si_lib = &system_info.libtorch_lib_dir;
+        // let use_cuda =
+        //     si_lib.join("libtorch_cuda.so").exists() || si_lib.join("torch_cuda.dll").exists();
+        // let use_cuda_cu = si_lib.join("libtorch_cuda_cu.so").exists()
+        //     || si_lib.join("torch_cuda_cu.dll").exists();
+        // let use_cuda_cpp = si_lib.join("libtorch_cuda_cpp.so").exists()
+        //     || si_lib.join("torch_cuda_cpp.dll").exists();
+        // let use_hip =
+        //     si_lib.join("libtorch_hip.so").exists() || si_lib.join("torch_hip.dll").exists();
+        // println!("cargo:rustc-link-search=native={}", si_lib.display());
 
-        system_info.make(use_cuda, use_hip);
+        // system_info.make(use_cuda, use_hip);
 
-        println!("cargo:rustc-link-lib=static=tch");
-        if use_cuda {
-            system_info.link("torch_cuda")
-        }
-        if use_cuda_cu {
-            system_info.link("torch_cuda_cu")
-        }
-        if use_cuda_cpp {
-            system_info.link("torch_cuda_cpp")
-        }
-        if use_hip {
-            system_info.link("torch_hip")
-        }
-        if cfg!(feature = "python-extension") {
-            system_info.link("torch_python")
-        }
-        if system_info.link_type == LinkType::Static {
-            // TODO: this has only be tried out on the cpu version. Check that it works
-            // with cuda too and maybe just try linking all available files?
-            system_info.link("asmjit");
-            system_info.link("clog");
-            system_info.link("cpuinfo");
-            system_info.link("dnnl");
-            system_info.link("dnnl_graph");
-            system_info.link("fbgemm");
-            system_info.link("gloo");
-            system_info.link("kineto");
-            system_info.link("nnpack");
-            system_info.link("onnx");
-            system_info.link("onnx_proto");
-            system_info.link("protobuf");
-            system_info.link("pthreadpool");
-            system_info.link("pytorch_qnnpack");
-            system_info.link("sleef");
-            system_info.link("tensorpipe");
-            system_info.link("tensorpipe_uv");
-            system_info.link("XNNPACK");
-        }
-        system_info.link("torch_cpu");
-        system_info.link("torch");
-        system_info.link("c10");
-        if use_hip {
-            system_info.link("c10_hip");
-        }
+        // println!("cargo:rustc-link-lib=static=tch");
+        // if use_cuda {
+        //     system_info.link("torch_cuda")
+        // }
+        // if use_cuda_cu {
+        //     system_info.link("torch_cuda_cu")
+        // }
+        // if use_cuda_cpp {
+        //     system_info.link("torch_cuda_cpp")
+        // }
+        // if use_hip {
+        //     system_info.link("torch_hip")
+        // }
+        // if cfg!(feature = "python-extension") {
+        //     system_info.link("torch_python")
+        // }
+        // if system_info.link_type == LinkType::Static {
+        //     // TODO: this has only be tried out on the cpu version. Check that it works
+        //     // with cuda too and maybe just try linking all available files?
+        //     system_info.link("asmjit");
+        //     system_info.link("clog");
+        //     system_info.link("cpuinfo");
+        //     system_info.link("dnnl");
+        //     system_info.link("dnnl_graph");
+        //     system_info.link("fbgemm");
+        //     system_info.link("gloo");
+        //     system_info.link("kineto");
+        //     system_info.link("nnpack");
+        //     system_info.link("onnx");
+        //     system_info.link("onnx_proto");
+        //     system_info.link("protobuf");
+        //     system_info.link("pthreadpool");
+        //     system_info.link("pytorch_qnnpack");
+        //     system_info.link("sleef");
+        //     system_info.link("tensorpipe");
+        //     system_info.link("tensorpipe_uv");
+        //     system_info.link("XNNPACK");
+        // }
+        // system_info.link("torch_cpu");
+        // system_info.link("torch");
+        // system_info.link("c10");
+        // if use_hip {
+        //     system_info.link("c10_hip");
+        // }
 
         let target = env::var("TARGET").context("TARGET variable not set")?;
 

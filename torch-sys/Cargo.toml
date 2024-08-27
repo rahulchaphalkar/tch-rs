@@ -12,8 +12,11 @@ keywords = ["pytorch", "ffi", "deep-learning", "machine-learning"]
 categories = ["external-ffi-bindings", "science"]
 license = "MIT/Apache-2.0"
 
+
 [dependencies]
 libc = "0.2.0"
+libloading = { version = "0.8.1", optional = true }
+once_cell = { version = "1.8", optional = true }
 
 [build-dependencies]
 anyhow = "^1.0.60"
@@ -27,6 +30,7 @@ zip = "0.6"
 download-libtorch = ["ureq", "serde", "serde_json"]
 doc-only = []
 python-extension = []
+runtime-linking = ["libloading", "once_cell"]
 
 [package.metadata.docs.rs]
 features = [ "doc-only" ]

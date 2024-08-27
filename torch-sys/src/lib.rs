@@ -1,17 +1,21 @@
+//pub use super::generated::load;
+pub mod linking;
+// link! {
 pub mod cuda;
 pub mod io;
-#[cfg(feature = "python-extension")]
-pub mod python;
+//#[cfg(feature = "python-extension")]
+//pub mod python;
 mod traits;
-
+// pub mod c_generated;
 use libc::{c_char, c_int, c_uchar, c_void, size_t};
 pub use traits::{DoubleList, IntList, IntListOption};
-
+//use linking::runtime_input::link;
+//use crate::link;
+link! {
 #[repr(C)]
 pub struct C_scalar {
     _private: [u8; 0],
 }
-
 extern "C" {
     pub fn ats_int(v: i64) -> *mut C_scalar;
     pub fn ats_float(v: f64) -> *mut C_scalar;
@@ -160,8 +164,8 @@ extern "C" {
     pub fn at_context_version_cudart() -> i64;
 }
 
+//pub mod runtime_linking;
 pub mod c_generated;
-
 extern "C" {
     pub fn get_and_reset_last_err() -> *mut c_char;
 }
@@ -333,7 +337,7 @@ extern "C" {
     pub fn atm_set_tensor_expr_fuser_enabled(enabled: c_int);
     pub fn atm_get_tensor_expr_fuser_enabled() -> bool;
 }
-
+}
 extern "C" {
     pub fn dummy_cuda_dependency();
 }

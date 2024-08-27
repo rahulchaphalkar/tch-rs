@@ -6,6 +6,8 @@ use libc::{c_int, c_void};
 use std::borrow::Borrow;
 use std::convert::TryFrom;
 use torch_sys::*;
+//use torch_sys::runtime_input;
+use torch_sys::linking::*;
 
 /// Argument and output values for JIT models. These represent arbitrary values,
 /// e.g. tensors, atomic values, pairs of values, etc.
@@ -462,6 +464,7 @@ impl CModule {
         f: &mut T,
         device: Device,
     ) -> Result<CModule, TchError> {
+        load();
         let mut buffer = Vec::new();
         f.read_to_end(&mut buffer)?;
         let buffer_ptr = buffer.as_ptr() as *const libc::c_char;
