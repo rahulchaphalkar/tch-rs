@@ -380,6 +380,7 @@ impl SystemInfo {
                 cc::Build::new()
                     .cpp(true)
                     .pic(true)
+                    //.link_lib_modifier(dylib)
                     .warnings(false)
                     .includes(&self.libtorch_include_dirs)
                     .flag(&format!("-Wl,-rpath={}", self.libtorch_lib_dir.display()))
@@ -388,6 +389,23 @@ impl SystemInfo {
                     .flag("-DGLOG_USE_GLOG_EXPORT")
                     .files(&c_files)
                     .compile("tch");
+
+                // Manually invoke the system linker to create a shared library from the object files
+    let output = std::process::Command::new("g++")
+    .args(&[
+        "-shared",
+        "-o", "/home/rahul/tools/libtch.so", // Output file name
+        "-Wl,-rpath=/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/lib/libtorch.so", // Replace with actual rpath
+        "-std=c++17",
+        "-D_GLIBCXX_USE_CXX11_ABI=1", // Replace with actual ABI setting
+        "/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-torch_api.o", // Replace with actual object file(s) produced by cc
+        "/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-torch_api_generated.o",
+        "/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-fake_cuda_dependency.o",
+        // Add other object files, libraries, or flags as needed
+    ])
+    .output()
+    .expect("Failed to create shared library");
+
             }
             Os::Windows => {
                 // TODO: Pass "/link" "LIBPATH:{}" to cl.exe in order to emulate rpath.
@@ -453,6 +471,9 @@ fn main() -> anyhow::Result<()> {
 
         system_info.make(use_cuda, use_hip);
 
+        // println!("cargo:rustc-cdylib-link-arg=-shared");
+        // println!("cargo:rustc-cdylib-link-arg=-o");
+        // println!("cargo:rustc-cdylib-link-arg=libtch.so");
         println!("cargo:rustc-link-lib=static=tch");
         if use_cuda {
             system_info.link("torch_cuda")
