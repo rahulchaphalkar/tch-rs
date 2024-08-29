@@ -401,6 +401,7 @@ impl SystemInfo {
         "/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-torch_api.o", // Replace with actual object file(s) produced by cc
         "/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-torch_api_generated.o",
         "/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-fake_cuda_dependency.o",
+        "/home/rahul/repos/pytorch-bindings/libtorch/lib/libtorch_cpu.so",
         // Add other object files, libraries, or flags as needed
     ])
     .output()
