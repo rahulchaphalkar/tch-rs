@@ -462,6 +462,7 @@ impl CModule {
         f: &mut T,
         device: Device,
     ) -> Result<CModule, TchError> {
+        //unsafe{dlopen_lib()};
         let mut buffer = Vec::new();
         f.read_to_end(&mut buffer)?;
         let buffer_ptr = buffer.as_ptr() as *const libc::c_char;

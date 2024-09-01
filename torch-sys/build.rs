@@ -273,6 +273,11 @@ impl SystemInfo {
     }
 
     fn prepare_libtorch_dir(os: Os) -> Result<PathBuf> {
+        if true {
+        //let libtorch = "/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install";
+        let libtorch = "/home/rahul/tools/fake";
+        return Ok(PathBuf::from(libtorch));
+        }
         if let Ok(libtorch) = env_var_rerun("LIBTORCH") {
             Ok(PathBuf::from(libtorch))
         } else if let Some(pathbuf) = Self::check_system_location(os) {
@@ -350,6 +355,7 @@ impl SystemInfo {
     }
 
     fn make(&self, use_cuda: bool, use_hip: bool) {
+
         let cuda_dependency = if use_cuda || use_hip {
             "libtch/dummy_cuda_dependency.cpp"
         } else {
@@ -370,14 +376,13 @@ impl SystemInfo {
         if cfg!(feature = "python-extension") {
             c_files.push("libtch/torch_python.cpp")
         }
-
         match self.os {
             Os::Linux | Os::Macos => {
                 // Pass the libtorch lib dir to crates that use torch-sys. This will be available
                 // as DEP_TORCH_SYS_LIBTORCH_LIB, see:
                 // https://doc.rust-lang.org/cargo/reference/build-scripts.html#the-links-manifest-key
                 println!("cargo:libtorch_lib={}", self.libtorch_lib_dir.display());
-                cc::Build::new()
+/*                cc::Build::new()
                     .cpp(true)
                     .pic(true)
                     //.link_lib_modifier(dylib)
@@ -389,19 +394,30 @@ impl SystemInfo {
                     .flag("-DGLOG_USE_GLOG_EXPORT")
                     .files(&c_files)
                     .compile("tch");
-
-                // Manually invoke the system linker to create a shared library from the object files
+*/
+                // Manually invoke the system linker to create a shared library from the object file
     let output = std::process::Command::new("g++")
     .args(&[
         "-shared",
-        "-o", "/home/rahul/tools/libtch.so", // Output file name
-        "-Wl,-rpath=/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/lib/libtorch.so", // Replace with actual rpath
+        "-o", "/home/rahul/tools/fake/libtch-dir/libtch.so", // Output file name
+        //"-Wl,--unresolved-symbols=ignore-all", // Ignore unresolved symbols
+        "-fPIC",
+        "-I/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/include",
+        "-I/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/include/torch/csrc/api/include",
+        //"-L/home/rahul/tools/fake/lib",
+        //"-ltorch",
+        //"-ltorch_cpu",
+        //"-lc10",
+        //"-Wl,--disable-new-dtags,-rpath=/home/rahul/tools/fake/faker",//libtorch.so",
         "-std=c++17",
         "-D_GLIBCXX_USE_CXX11_ABI=1", // Replace with actual ABI setting
-        "/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-torch_api.o", // Replace with actual object file(s) produced by cc
-        "/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-torch_api_generated.o",
-        "/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-fake_cuda_dependency.o",
-        "/home/rahul/repos/pytorch-bindings/libtorch/lib/libtorch_cpu.so",
+        //"/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-torch_api.o", // Replace with actual object file(s) produced by cc
+        //"/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-torch_api_generated.o",
+        //"/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-fake_cuda_dependency.o",
+        "/home/rahul/repos/pytorch-bindings/tch-rs/torch-sys/libtch/torch_api.cpp",
+        "/home/rahul/repos/pytorch-bindings/tch-rs/torch-sys/libtch/torch_api_generated.cpp",
+        //"/home/rahul/repos/pytorch-bindings/tch-rs/torch-sys/libtch/fake_cuda_dependency.cpp",
+        //"/home/rahul/repos/pytorch-bindings/libtorch/lib/libtorch_cpu.so",
         // Add other object files, libraries, or flags as needed
     ])
     .output()
@@ -472,10 +488,11 @@ fn main() -> anyhow::Result<()> {
 
         system_info.make(use_cuda, use_hip);
 
-        // println!("cargo:rustc-cdylib-link-arg=-shared");
-        // println!("cargo:rustc-cdylib-link-arg=-o");
-        // println!("cargo:rustc-cdylib-link-arg=libtch.so");
-        println!("cargo:rustc-link-lib=static=tch");
+        //println!("cargo:rustc-link-lib=static=tch");
+        //println!("cargo:rustc-link-search=native=/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/lib/");
+        println!("cargo:rustc-link-lib=dylib=tch");
+        println!("cargo:rustc-link-search=native=/home/rahul/tools/fake/libtch-dir");
+
         if use_cuda {
             system_info.link("torch_cuda")
         }
@@ -513,9 +530,10 @@ fn main() -> anyhow::Result<()> {
             system_info.link("tensorpipe_uv");
             system_info.link("XNNPACK");
         }
-        system_info.link("torch_cpu");
-        system_info.link("torch");
-        system_info.link("c10");
+        //system_info.link("torch_cpu");
+        //system_info.link("torch");
+        //system_info.link("c10");
+        //system_info.link("tch");
         if use_hip {
             system_info.link("c10_hip");
         }

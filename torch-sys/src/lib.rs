@@ -3,6 +3,7 @@ pub mod io;
 #[cfg(feature = "python-extension")]
 pub mod python;
 mod traits;
+use libloading::{Library, Symbol};
 
 use libc::{c_char, c_int, c_uchar, c_void, size_t};
 pub use traits::{DoubleList, IntList, IntListOption};
