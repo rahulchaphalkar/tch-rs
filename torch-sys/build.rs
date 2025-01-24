@@ -9,6 +9,9 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::{env, fs, io};
+use std::process::Command;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Write};
 
 const TORCH_VERSION: &str = "2.4.0";
 const PYTHON_PRINT_PYTORCH_DETAILS: &str = r"
@@ -41,6 +44,7 @@ https://github.com/LaurentMazare/tch-rs/blob/main/README.md
 enum LinkType {
     Dynamic,
     Static,
+    Runtime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,9 +255,13 @@ impl SystemInfo {
             env_var_rerun("LIBTORCH_CXX11_ABI").unwrap_or_else(|_| "1".to_owned())
         };
         let libtorch_lib_dir = libtorch_lib_dir.expect("no libtorch lib dir found");
-        let link_type = match env_var_rerun("LIBTORCH_STATIC").as_deref() {
-            Err(_) | Ok("0") | Ok("false") | Ok("FALSE") => LinkType::Dynamic,
-            Ok(_) => LinkType::Static,
+        let link_type = if cfg!(feature = "runtime-linking") {
+            LinkType::Runtime
+        } else {
+                match env_var_rerun("LIBTORCH_STATIC").as_deref() {
+                Err(_) | Ok("0") | Ok("false") | Ok("FALSE") => LinkType::Dynamic,
+                Ok(_) => LinkType::Static,
+            }
         };
         Ok(Self {
             os,
@@ -273,10 +281,11 @@ impl SystemInfo {
     }
 
     fn prepare_libtorch_dir(os: Os) -> Result<PathBuf> {
-        if true {
-        //let libtorch = "/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install";
-        let libtorch = "/home/rahul/tools/fake";
-        return Ok(PathBuf::from(libtorch));
+        if cfg!(feature = "runtime-linking") {
+            // let libtorch = "/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install";
+            // let libtorch = "/home/rahul/tools/fake";
+            // return Ok(PathBuf::from(libtorch));
+            return Ok(PathBuf::new());
         }
         if let Ok(libtorch) = env_var_rerun("LIBTORCH") {
             Ok(PathBuf::from(libtorch))
@@ -376,34 +385,41 @@ impl SystemInfo {
         if cfg!(feature = "python-extension") {
             c_files.push("libtch/torch_python.cpp")
         }
+        // let source_files = [
+        // "/home/rahul/repos/pytorch_bindings/tch-rs/torch-sys/libtch/torch_api.cpp",
+        // "/home/rahul/repos/pytorch_bindings/tch-rs/torch-sys/libtch/torch_api_generated.cpp",
+        // ];
         match self.os {
             Os::Linux | Os::Macos => {
                 // Pass the libtorch lib dir to crates that use torch-sys. This will be available
                 // as DEP_TORCH_SYS_LIBTORCH_LIB, see:
                 // https://doc.rust-lang.org/cargo/reference/build-scripts.html#the-links-manifest-key
                 println!("cargo:libtorch_lib={}", self.libtorch_lib_dir.display());
-/*                cc::Build::new()
-                    .cpp(true)
-                    .pic(true)
-                    //.link_lib_modifier(dylib)
-                    .warnings(false)
-                    .includes(&self.libtorch_include_dirs)
-                    .flag(&format!("-Wl,-rpath={}", self.libtorch_lib_dir.display()))
-                    .flag("-std=c++17")
-                    .flag(&format!("-D_GLIBCXX_USE_CXX11_ABI={}", self.cxx11_abi))
-                    .flag("-DGLOG_USE_GLOG_EXPORT")
-                    .files(&c_files)
-                    .compile("tch");
-*/
+                if self.link_type != LinkType::Runtime {
+                    cc::Build::new()
+                        .cpp(true)
+                        .pic(true)
+                        //.link_lib_modifier(dylib)
+                        .warnings(false)
+                        .includes(&self.libtorch_include_dirs)
+                        .flag(&format!("-Wl,-rpath={}", self.libtorch_lib_dir.display()))
+                        .flag("-std=c++17")
+                        .flag(&format!("-D_GLIBCXX_USE_CXX11_ABI={}", self.cxx11_abi))
+                        .flag("-DGLOG_USE_GLOG_EXPORT")
+                        .files(&c_files)
+                        .compile("tch");
+                }
+                else {
                 // Manually invoke the system linker to create a shared library from the object file
+if cfg!(feature = "dummy-build") {
     let output = std::process::Command::new("g++")
     .args(&[
         "-shared",
         "-o", "/home/rahul/tools/fake/libtch-dir/libtch.so", // Output file name
         //"-Wl,--unresolved-symbols=ignore-all", // Ignore unresolved symbols
         "-fPIC",
-        "-I/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/include",
-        "-I/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/include/torch/csrc/api/include",
+        "-I/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/include",//
+        "-I/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/include/torch/csrc/api/include",//
         //"-L/home/rahul/tools/fake/lib",
         //"-ltorch",
         //"-ltorch_cpu",
@@ -411,19 +427,97 @@ impl SystemInfo {
         //"-Wl,--disable-new-dtags,-rpath=/home/rahul/tools/fake/faker",//libtorch.so",
         "-std=c++17",
         "-D_GLIBCXX_USE_CXX11_ABI=1", // Replace with actual ABI setting
-        //"/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-torch_api.o", // Replace with actual object file(s) produced by cc
-        //"/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-torch_api_generated.o",
-        //"/home/rahul/repos/pytorch-bindings/tch-rs/target/debug/build/torch-sys-2e02dd941cc03326/out/19072f24a82f85ae-fake_cuda_dependency.o",
-        "/home/rahul/repos/pytorch-bindings/tch-rs/torch-sys/libtch/torch_api.cpp",
-        "/home/rahul/repos/pytorch-bindings/tch-rs/torch-sys/libtch/torch_api_generated.cpp",
+        "/home/rahul/repos/pytorch_bindings/tch-rs/torch-sys/libtch/torch_api.cpp",//
+        "/home/rahul/repos/pytorch_bindings/tch-rs/torch-sys/libtch/torch_api_generated.cpp",//
         //"/home/rahul/repos/pytorch-bindings/tch-rs/torch-sys/libtch/fake_cuda_dependency.cpp",
         //"/home/rahul/repos/pytorch-bindings/libtorch/lib/libtorch_cpu.so",
-        // Add other object files, libraries, or flags as needed
     ])
     .output()
     .expect("Failed to create shared library");
 
+    if !output.status.success() {
+        panic!(
+            "Compilation failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let mut symbols = Vec::new();
+        //let obj_file = format!("{}.o", source_file);
+        let obj_file = "/home/rahul/tools/fake/libtch-dir/libtch.so";
+        let output = Command::new("nm")
+            .args(&["-u", &obj_file])
+            .output()
+            .expect("Failed to run nm");
+
+        if !output.status.success() {
+            panic!(
+                "nm failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let reader = BufReader::new(output.stdout.as_slice());
+        for line in reader.lines() {
+            let line = line.expect("Failed to read line");
+            if let Some(symbol) = line.split_whitespace().last() {
+                let clean_symbol = symbol.split('@').next().unwrap().to_string();
+                symbols.push(clean_symbol);
             }
+        }
+
+    // Generate the fake_symbols.h file
+    //let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
+    let out_dir = "/home/rahul/tools/fake";
+    let fake_symbols_path = format!("{}/fake_symbols.h", out_dir);
+    let mut fake_symbols_file = File::create(&fake_symbols_path).expect("Failed to create fake_symbols.h");
+
+    writeln!(fake_symbols_file, "// Auto-generated file").expect("Failed to write to fake_symbols.h");
+    writeln!(fake_symbols_file, "extern \"C\" {{").expect("Failed to write to fake_symbols.h");
+    for symbol in &symbols {
+        writeln!(fake_symbols_file, "extern void {}();", symbol).expect("Failed to write to fake_symbols.h");
+    }
+    writeln!(fake_symbols_file, "}}").expect("Failed to write to fake_symbols.h");
+    //}
+    // Generate the fake_symbols.cpp file
+    let fake_cpp_path = format!("{}/fake_symbols.cpp", out_dir);
+    let mut fake_cpp_file = File::create(&fake_cpp_path).expect("Failed to create fake_symbols.cpp");
+
+    writeln!(fake_cpp_file, "#include \"fake_symbols.h\"").expect("Failed to write to fake_symbols.cpp");
+
+    // Dummy function to reference all extern symbols
+    writeln!(fake_cpp_file, "void use_all_symbols() {{").expect("Failed to write to fake_symbols.cpp");
+
+    for symbol in &symbols {
+        writeln!(fake_cpp_file, "    {}();", symbol).expect("Failed to write to fake_symbols.cpp");
+    }
+    writeln!(fake_cpp_file, "}}").expect("Failed to write to fake_symbols.cpp");
+}
+    // create dummy .so file
+    let output = Command::new("g++")
+        .args(&[
+            "-shared",
+            //"-o", "/home/rahul/tools/fake/libtch-dir/libtch_fake.so", // Output file name
+            "-o", "libtch/libtch_fake.so",
+            "-fPIC",
+            "-std=c++17",
+            "-D_GLIBCXX_USE_CXX11_ABI=1",
+            //"-Wl,--unresolved-symbols=ignore-in-object-files",
+            //&fake_cpp_path,
+            "libtch/fake_symbols.cpp"
+        ])
+        .output()
+        .expect("Failed to create shared library");
+
+    if !output.status.success() {
+        panic!(
+            "Linking failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+            };
+        }
             Os::Windows => {
                 // TODO: Pass "/link" "LIBPATH:{}" to cl.exe in order to emulate rpath.
                 //       Not yet supported by cc=rs.
@@ -443,7 +537,7 @@ impl SystemInfo {
 
     fn link(&self, lib_name: &str) {
         match self.link_type {
-            LinkType::Dynamic => println!("cargo:rustc-link-lib={lib_name}"),
+            LinkType::Dynamic | LinkType::Runtime => println!("cargo:rustc-link-lib={lib_name}"),
             LinkType::Static => {
                 // TODO: whole-archive might only be necessary for libtorch_cpu?
                 println!("cargo:rustc-link-lib=static:+whole-archive,-bundle={lib_name}")
