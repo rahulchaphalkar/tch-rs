@@ -391,11 +391,13 @@ impl SystemInfo {
         // ];
         match self.os {
             Os::Linux | Os::Macos => {
+                println!("Entering Linux");
                 // Pass the libtorch lib dir to crates that use torch-sys. This will be available
                 // as DEP_TORCH_SYS_LIBTORCH_LIB, see:
                 // https://doc.rust-lang.org/cargo/reference/build-scripts.html#the-links-manifest-key
                 println!("cargo:libtorch_lib={}", self.libtorch_lib_dir.display());
-                if self.link_type != LinkType::Runtime {
+                if self.link_type != LinkType::Runtime && !cfg!(feature = "build-artifacts") {
+                    println!("Entering Dynamic link branch");
                     cc::Build::new()
                         .cpp(true)
                         .pic(true)
@@ -410,65 +412,72 @@ impl SystemInfo {
                         .compile("tch");
                 }
                 else {
-                // Manually invoke the system linker to create a shared library from the object file
-if cfg!(feature = "dummy-build") {
+                    println!("Entering Else");
+if cfg!(feature = "build-artifacts") {
+//#[cfg(feature = "build-artifacts")] {
+    println!("Entering build-artifacts branch");
     let output = std::process::Command::new("g++")
     .args(&[
         "-shared",
-        "-o", "/home/rahul/tools/fake/libtch-dir/libtch.so", // Output file name
-        //"-Wl,--unresolved-symbols=ignore-all", // Ignore unresolved symbols
+        //"-o", "/home/rahul/tools/fake/libtch-dir/libtch.so", // Output file name
+        "-o", "/home/rahul/repos/pytorch_bindings/tch-rs/torch-sys/libtch/libtch_original.so",
         "-fPIC",
-        "-I/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/include",//
-        "-I/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/include/torch/csrc/api/include",//
-        //"-L/home/rahul/tools/fake/lib",
-        //"-ltorch",
-        //"-ltorch_cpu",
-        //"-lc10",
-        //"-Wl,--disable-new-dtags,-rpath=/home/rahul/tools/fake/faker",//libtorch.so",
+        //"-I/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/include",//
+        //"-I/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/include/torch/csrc/api/include",//
+        "-I/home/rahul/tools/libtorch/include", // libtorch 2.4.0
+        "-I/home/rahul/tools/libtorch/include/torch/csrc/api/include",
         "-std=c++17",
         "-D_GLIBCXX_USE_CXX11_ABI=1", // Replace with actual ABI setting
         "/home/rahul/repos/pytorch_bindings/tch-rs/torch-sys/libtch/torch_api.cpp",//
         "/home/rahul/repos/pytorch_bindings/tch-rs/torch-sys/libtch/torch_api_generated.cpp",//
-        //"/home/rahul/repos/pytorch-bindings/tch-rs/torch-sys/libtch/fake_cuda_dependency.cpp",
-        //"/home/rahul/repos/pytorch-bindings/libtorch/lib/libtorch_cpu.so",
     ])
     .output()
     .expect("Failed to create shared library");
-
-    if !output.status.success() {
-        panic!(
-            "Compilation failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    println!("g++ stdout: {}", String::from_utf8_lossy(&output.stdout));
+    println!("g++ stderr: {}", String::from_utf8_lossy(&output.stderr));
 
     let mut symbols = Vec::new();
-        //let obj_file = format!("{}.o", source_file);
-        let obj_file = "/home/rahul/tools/fake/libtch-dir/libtch.so";
+        //let obj_file = "/home/rahul/tools/fake/libtch-dir/libtch.so";
+        let obj_file = "/home/rahul/repos/pytorch_bindings/tch-rs/torch-sys/libtch/libtch_original.so";
         let output = Command::new("nm")
-            .args(&["-u", &obj_file])
+            //.args(&["-u", &obj_file])
+            .args(&[&obj_file])
             .output()
             .expect("Failed to run nm");
-
-        if !output.status.success() {
-            panic!(
-                "nm failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
 
         let reader = BufReader::new(output.stdout.as_slice());
         for line in reader.lines() {
             let line = line.expect("Failed to read line");
             if let Some(symbol) = line.split_whitespace().last() {
-                let clean_symbol = symbol.split('@').next().unwrap().to_string();
+                // Eliminate symbols with _GLOBAL
+                if symbol.contains("_GLOBAL") {
+                    continue;
+                }
+
+                // Eliminate symbols that are just numbers
+        if symbol.chars().all(|c| c.is_digit(10)) {
+            continue;
+        }
+
+            // Process remaining symbols with a "." to discard the left-hand side
+            let clean_symbol = if symbol.contains('.') {
+                symbol.split('.').last().unwrap().to_string()
+            } else {
+                symbol.split('@').next().unwrap().to_string()
+            };
+                //let clean_symbol = symbol.split('@').next().unwrap().to_string();
+        // Eliminate symbols that are just numbers after processing
+        if clean_symbol.chars().all(|c| c.is_digit(10)) {
+            continue;
+        }
                 symbols.push(clean_symbol);
             }
         }
 
     // Generate the fake_symbols.h file
     //let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
-    let out_dir = "/home/rahul/tools/fake";
+    //let out_dir = "/home/rahul/tools/fake";
+    let out_dir = "/home/rahul/repos/pytorch_bindings/tch-rs/torch-sys/libtch";
     let fake_symbols_path = format!("{}/fake_symbols.h", out_dir);
     let mut fake_symbols_file = File::create(&fake_symbols_path).expect("Failed to create fake_symbols.h");
 
@@ -497,12 +506,10 @@ if cfg!(feature = "dummy-build") {
     let output = Command::new("g++")
         .args(&[
             "-shared",
-            //"-o", "/home/rahul/tools/fake/libtch-dir/libtch_fake.so", // Output file name
-            "-o", "libtch/libtch_fake.so",
+            "-o", "/home/rahul/repos/pytorch_bindings/tch-rs/torch-sys/libtch/libtch.so",
             "-fPIC",
             "-std=c++17",
             "-D_GLIBCXX_USE_CXX11_ABI=1",
-            //"-Wl,--unresolved-symbols=ignore-in-object-files",
             //&fake_cpp_path,
             "libtch/fake_symbols.cpp"
         ])
@@ -584,8 +591,9 @@ fn main() -> anyhow::Result<()> {
 
         //println!("cargo:rustc-link-lib=static=tch");
         //println!("cargo:rustc-link-search=native=/home/rahul/repos/pytorch-bindings/pytorch/pytorch-install/lib/");
+
         println!("cargo:rustc-link-lib=dylib=tch");
-        println!("cargo:rustc-link-search=native=/home/rahul/tools/fake/libtch-dir");
+        println!("cargo:rustc-link-search=native=/home/rahul/repos/pytorch_bindings/tch-rs/torch-sys/libtch");
 
         if use_cuda {
             system_info.link("torch_cuda")
